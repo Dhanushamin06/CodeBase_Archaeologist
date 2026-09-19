@@ -2,7 +2,7 @@
 import json, re
 from pathlib import Path
 
-from agent import MODEL, check_url, clean, clone, fast, graph, make_llm, read_file, subprocess
+from agent import MODEL, check_url, clean, clone, extract_mermaid, fast, graph, make_llm, read_file, subprocess
 
 CACHE = Path(".cache")
 mid = make_llm(False, 4096)  # non-reasoning model for quick grounded answers
@@ -17,7 +17,7 @@ def run(url):
     """Yield (node, update) pairs. Serves from a disk cache while the repo's HEAD is unchanged."""
     url = check_url(url)
     sha = remote_sha(url)
-    f = CACHE / f"{sha}-{MODEL.replace('/', '_')}.json" if sha else None
+    f = CACHE / f"v2-{sha}-{MODEL.replace('/', '_')}.json" if sha else None
     if f and f.exists():
         yield "cache", json.loads(f.read_text())
         return
@@ -59,4 +59,4 @@ def trace_flow(res, flow):
         res, f"Trace this flow end to end: {flow}",
         "Return ONLY a Mermaid sequenceDiagram (max 10 participants) of this flow, based only on the source and summary. "
         'Declare participants like: participant A as "Label". Ids alphanumeric; no parentheses or special characters in messages.')
-    return re.sub(r"^```(?:mermaid)?\s*|```\s*$", "", code).strip(), files
+    return extract_mermaid(code), files

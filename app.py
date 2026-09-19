@@ -1,3 +1,5 @@
+import html
+
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -17,7 +19,7 @@ LABELS = {"clone": "Cloned repository", "scan": "Mapped file tree, git history a
 
 def mermaid(code, height=600):
     components.html(
-        f'<pre class="mermaid">{code}</pre><script type="module">'
+        f'<pre class="mermaid">{html.escape(code)}</pre><script type="module">'
         'import m from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";'
         "m.initialize({startOnLoad:true});</script>", height=height, scrolling=True)
 
@@ -36,6 +38,8 @@ if st.button("Dig in", type="primary"):
                 res.update(out)
                 if node == "explore":
                     st.write("📂 Read: " + ", ".join(f"`{f}`" for f in out["files_read"]))
+                    if not out["files_read"]:
+                        st.warning("The agent read no files, so the diagram will be generic.")
             status.update(label="Done", state="complete")
         st.session_state["res"] = res
     except Exception as e:
@@ -50,6 +54,8 @@ if res:
     with t2:
         mermaid(res["mermaid"])
         st.download_button("Download diagram (.mmd)", res["mermaid"], "architecture.mmd")
+        with st.expander("Diagram source (paste into mermaid.live to debug)"):
+            st.code(res["mermaid"])
         st.subheader("Trace a flow")
         flow = st.text_input("Describe a flow", placeholder="e.g. what happens when a user logs in?")
         if st.button("Trace it") and flow:

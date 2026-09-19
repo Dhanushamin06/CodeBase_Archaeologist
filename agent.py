@@ -8,21 +8,28 @@ from typing import Dict, List, TypedDict
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).with_name(".env"), override=True)  # .env next to agent.py
+load_dotenv()  # or a .env in the folder you launch from
+
 MODEL = os.getenv("ARCH_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
 BASE_URL = os.getenv("ARCH_BASE_URL", "https://integrate.api.nvidia.com/v1")  # NVIDIA's OpenAI-compatible endpoint
-API_KEY = os.getenv("NVIDIA_API_KEY") or os.getenv("OPENAI_API_KEY")
+_KEY_VAR = "NVIDIA_API_KEY" if "nvidia.com" in BASE_URL else "OPENAI_API_KEY"
+API_KEY = (os.getenv(_KEY_VAR) or "").strip().strip("\"'")
+if not API_KEY:
+    raise RuntimeError(f"{_KEY_VAR} is not set in the terminal running this app. "
+                       f"Run `export {_KEY_VAR}=...` (Windows: `set {_KEY_VAR}=...`) in the same window, then restart.")
 
 
 def make_llm(thinking, max_tokens):
     extra = {"chat_template_kwargs": {"enable_thinking": thinking}}
-    if thinking:
-        extra["reasoning_budget"] = 4096  # cap reasoning so the final answer isn't truncated
     return ChatOpenAI(model=MODEL, base_url=BASE_URL, api_key=API_KEY, temperature=0.6, top_p=0.95,
                       max_tokens=max_tokens, max_retries=4, timeout=180, extra_body=extra)
 
 
 fast = make_llm(False, 1024)    # explorer loop: reasoning off for speed
-llm = make_llm(True, 16384)     # diagram / bug review / doc: reasoning on
+llm = make_llm(os.getenv("ARCH_THINKING", "1") == "1", 16384)  # diagram / review / doc; ARCH_THINKING=0 = faster
 
 
 def clean(text):
@@ -161,13 +168,57 @@ def explore(s):
     return {"files_read": read}
 
 
+plain = make_llm(False, 4096)  # no reasoning: reliable, fast JSON
+
+
+def safe_label(t):
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s./+-]", " ", str(t))).strip()[:40] or "component"
+
+
+def build_mermaid(spec):
+    """Python (not the LLM) writes the Mermaid syntax, so it is always valid."""
+    ids, lines = {}, ["flowchart TD"]
+    for i, n in enumerate(spec["nodes"][:14]):
+        ids[str(n["id"])] = f"n{i}"
+        lines.append(f'    n{i}["{safe_label(n["label"])}"]')
+    for e in spec["edges"][:30]:
+        x, y = ids.get(str(e["from"])), ids.get(str(e["to"]))
+        if x and y:
+            lab = safe_label(e["label"]) if e.get("label") else ""
+            lines.append(f'    {x} -->|"{lab}"| {y}' if lab else f"    {x} --> {y}")
+    return "\n".join(lines)
+
+
+def fallback_mermaid(s):
+    """No LLM needed: repository -> its top-level folders."""
+    top = [l.strip("/ ") for l in s["tree"].splitlines() if l.endswith("/") and not l.startswith(" ")][:10]
+    lines = ["flowchart TD", '    r["Repository"]']
+    for i, d in enumerate(top or ["source"]):
+        lines += [f'    d{i}["{safe_label(d)}"]', f"    r --> d{i}"]
+    return "\n".join(lines)
+
+
+def extract_mermaid(text):
+    """Pull diagram code out of a reply even if it has chatter or code fences around it."""
+    m = re.search(r"```(?:mermaid)?\s*(.*?)```", text, re.S)
+    text = m.group(1) if m else text
+    m = re.search(r"^\s*(flowchart|graph|sequenceDiagram)\b.*", text, re.S | re.M)
+    return (m.group(0) if m else text).strip()
+
+
 def draw(s):
-    out = llm.invoke(
-        "Produce a Mermaid `flowchart TD` of this codebase's architecture (max 14 nodes: components, data stores, "
-        "external services; label arrows with data flow). Rules: node ids alphanumeric only; every node label in "
-        'double quotes like A["API server"]; no parentheses or special characters inside labels. Return ONLY the code.\n\n'
-        + ctx(s)).content
-    return {"mermaid": re.sub(r"^```(?:mermaid)?\s*|```\s*$", "", clean(out)).strip()}
+    prompt = ('Describe this codebase\'s architecture as JSON only, in this shape: '
+              '{"nodes":[{"id":"api","label":"REST API"}],"edges":[{"from":"api","to":"db","label":"queries"}]}. '
+              "Use 6-14 nodes (components, data stores, external services) and edges for data flow or calls. "
+              "Labels under 5 words, using real names from the code.\n\n" + ctx(s))
+    for _ in range(2):
+        try:
+            spec = json.loads(re.search(r"\{.*\}", clean(plain.invoke(prompt).content), re.S).group())
+            if spec["nodes"]:
+                return {"mermaid": build_mermaid(spec)}
+        except Exception:
+            pass
+    return {"mermaid": fallback_mermaid(s)}
 
 
 def find_bugs(s):
