@@ -1,4 +1,5 @@
-import html
+import json
+import re
 
 import pandas as pd
 import streamlit as st
@@ -18,10 +19,25 @@ LABELS = {"clone": "Cloned repository", "scan": "Mapped file tree, git history a
 
 
 def mermaid(code, height=600):
+    """Render once the frame is visible (hidden tabs break layout); retry with safer settings on failure."""
+    plain_code = re.sub(r'\|"[^"]*"\|', "", code)  # same diagram without edge labels
+    payload = json.dumps([code, plain_code]).replace("</", "<\\/")
     components.html(
-        f'<pre class="mermaid">{html.escape(code)}</pre><script type="module">'
+        '<div id="out"></div><script type="module">'
         'import m from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";'
-        "m.initialize({startOnLoad:true});</script>", height=height, scrolling=True)
+        f"const codes = {payload}; const out = document.getElementById('out');"
+        "const cfgs = [{}, {flowchart:{curve:'linear', htmlLabels:false}}, {flowchart:{curve:'linear', htmlLabels:false}}];"
+        "async function draw(){ let err;"
+        " for (let i = 0; i < 3; i++) {"
+        "  try { m.initialize({startOnLoad:false, ...cfgs[i]}); const c = codes[i === 2 ? 1 : 0];"
+        "   await m.parse(c); const r = await m.render('g' + Date.now(), c); out.innerHTML = r.svg; return; }"
+        "  catch (e) { err = e; document.querySelectorAll('[id^=\"dg\"]').forEach(x => x.remove()); } }"
+        " out.textContent = 'Diagram error: ' + (err.message || err);"
+        " out.style.cssText = 'color:#b00020;font:13px monospace;white-space:pre-wrap'; }"
+        "if (document.body.clientWidth > 0) draw();"
+        "else new ResizeObserver((_, ob) => { if (document.body.clientWidth > 0) { ob.disconnect(); draw(); } })"
+        ".observe(document.body);"
+        "</script>", height=height, scrolling=True)
 
 
 url = st.text_input("GitHub repo URL", "https://github.com/pallets/click")

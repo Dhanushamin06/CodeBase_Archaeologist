@@ -2,7 +2,7 @@
 import json, re
 from pathlib import Path
 
-from agent import MODEL, check_url, clean, clone, extract_mermaid, fast, graph, make_llm, read_file, subprocess
+from agent import MODEL, check_url, clean, clone, fast, safe_label, graph, make_llm, read_file, subprocess
 
 CACHE = Path(".cache")
 mid = make_llm(False, 4096)  # non-reasoning model for quick grounded answers
@@ -54,9 +54,23 @@ def answer(res, question):
                     "paths, and say so plainly if the source doesn't show the answer.")
 
 
+def build_sequence(spec):
+    ids, lines = {}, ["sequenceDiagram"]
+    for i, p in enumerate(spec["participants"][:10]):
+        ids[str(p["id"])] = f"p{i}"
+        lines.append(f"    participant p{i} as {safe_label(p['label'])}")
+    for m in spec["messages"][:25]:
+        a, b = ids.get(str(m["from"])), ids.get(str(m["to"]))
+        if a and b:
+            lines.append(f"    {a}->>{b}: {safe_label(m.get('text') or 'call')}")
+    return "\n".join(lines)
+
+
 def trace_flow(res, flow):
-    code, files = grounded(
+    text, files = grounded(
         res, f"Trace this flow end to end: {flow}",
-        "Return ONLY a Mermaid sequenceDiagram (max 10 participants) of this flow, based only on the source and summary. "
-        'Declare participants like: participant A as "Label". Ids alphanumeric; no parentheses or special characters in messages.')
-    return extract_mermaid(code), files
+        'Reply with JSON only: {"participants":[{"id":"web","label":"Web app"}],'
+        '"messages":[{"from":"web","to":"api","text":"POST login"}]}. '
+        "At most 8 participants and 20 messages, in order, based only on the source and summary.")
+    spec = json.loads(re.search(r"\{.*\}", text, re.S).group())
+    return build_sequence(spec), files

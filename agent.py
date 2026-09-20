@@ -181,9 +181,11 @@ def build_mermaid(spec):
     for i, n in enumerate(spec["nodes"][:14]):
         ids[str(n["id"])] = f"n{i}"
         lines.append(f'    n{i}["{safe_label(n["label"])}"]')
+    seen = set()
     for e in spec["edges"][:30]:
         x, y = ids.get(str(e["from"])), ids.get(str(e["to"]))
-        if x and y:
+        if x and y and x != y and (x, y) not in seen:  # self-loops/duplicates crash mermaid 10
+            seen.add((x, y))
             lab = safe_label(e["label"]) if e.get("label") else ""
             lines.append(f'    {x} -->|"{lab}"| {y}' if lab else f"    {x} --> {y}")
     return "\n".join(lines)
