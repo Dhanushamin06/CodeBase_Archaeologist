@@ -2,3 +2,4 @@ streamlit
 langgraph
 langchain-openai
 pandas
+dotenv
