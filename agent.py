@@ -1,5 +1,4 @@
-"""Codebase Archaeologist: a LangGraph agent that digs through a GitHub repo
-and produces an architecture diagram, a bug review and an onboarding guide."""
+
 import json, os, re, shutil, subprocess, sys, tempfile
 from collections import Counter
 from pathlib import Path
@@ -10,7 +9,7 @@ from langgraph.graph import END, StateGraph
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).with_name(".env"), override=True)  # .env next to agent.py
+load_dotenv(Path(__file__).with_name(".env"), override=True) 
 load_dotenv()  # or a .env in the folder you launch from
 
 MODEL = os.getenv("ARCH_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
@@ -83,7 +82,6 @@ def clone(s):
 
 
 def repo_facts(root, churn):
-    """Deterministic 'archaeology' stats: LOC by language, contributors, bus factor, churn."""
     loc = Counter()
     for dp, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in IGNORE]
@@ -144,7 +142,6 @@ MAX_STEPS = 8
 
 
 def explore(s):
-    """The autonomous part: the LLM decides which file to open next."""
     read, tried = {}, set()
     for _ in range(MAX_STEPS):
         seen = "\n".join(f"- {k}: {v[:300]!r}" for k, v in read.items()) or "(none)"
@@ -266,13 +263,13 @@ for name, fn in [("clone", clone), ("scan", scan), ("explore", explore), ("draw"
 g.set_entry_point("clone")
 g.add_edge("clone", "scan")
 g.add_edge("scan", "explore")
-g.add_edge("explore", "draw")        # fan-out: diagram and bug hunt run in parallel
+g.add_edge("explore", "draw")        
 g.add_edge("explore", "find_bugs")
-g.add_edge(["draw", "find_bugs"], "write_doc")  # fan-in
+g.add_edge(["draw", "find_bugs"], "write_doc")  
 g.add_edge("write_doc", END)
 graph = g.compile()
 
-if __name__ == "__main__":  # CLI backup for demos: python agent.py <url>
+if __name__ == "__main__":  
     final = {}
     for upd in graph.stream({"repo_url": sys.argv[1]}, stream_mode="updates"):
         for node, out in upd.items():
